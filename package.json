@@ -1,6 +1,6 @@
 {
   "name": "upavif",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A React hook for converting images to AVIF format and uploading them",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -37,9 +37,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gaurav-sharma4/react-avif-uploader"
+    "url": "https://github.com/gauravsharma2003/UpAvif.git"
   },
-  "homepage": "https://github.com/gaurav-sharma4/react-avif-uploader#readme",
+  "homepage": "https://github.com/gauravsharma2003/UpAvif/blob/main/README.md",
   "publishConfig": {
     "access": "public"
   },
