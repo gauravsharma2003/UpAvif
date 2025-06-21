@@ -147,8 +147,6 @@ export const useUpAvif = ({
   };
 };
 
-// Export types
 export type { ConverterStatus, UploadResponse, ConversionOptions, UseAvifConverterProps, UseAvifConverterReturn };
 
-// Backward compatibility alias
 export const useAvifConverter = useUpAvif;
