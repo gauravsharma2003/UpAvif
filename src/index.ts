@@ -1,1 +1,2 @@
-export * from './useAvifConverter'; 
+export * from './useAvifConverter';
+export { useUpAvif } from './useAvifConverter'; 

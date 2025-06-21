@@ -1,7 +1,6 @@
 import typescript from '@rollup/plugin-typescript';
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
-import copy from 'rollup-plugin-copy';
 
 export default {
   input: 'src/index.ts',
@@ -17,18 +16,10 @@ export default {
       sourcemap: true
     }
   ],
-  external: ['react', '@jsquash/avif'],
+  external: ['react'],
   plugins: [
     typescript(),
     resolve(),
-    commonjs(),
-    copy({
-      targets: [
-        { 
-          src: 'node_modules/@jsquash/avif/codec/enc/avif_enc*.wasm', 
-          dest: 'dist/codec/enc' 
-        }
-      ]
-    })
+    commonjs()
   ]
 }; 

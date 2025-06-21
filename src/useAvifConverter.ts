@@ -1,25 +1,17 @@
 import { useState, useCallback } from 'react';
-import { encode } from '@jsquash/avif';
-import { getWasmUrl } from './wasmInit';
 
-let initialized = false;
-const initializeWasm = async () => {
-  if (!initialized) {
-    const wasmUrl = getWasmUrl();
-    // @ts-ignore - the encode module has an internal setWasmUrl function
-    if (encode.setWasmUrl) {
-      // @ts-ignore
-      await encode.setWasmUrl(wasmUrl);
-      initialized = true;
-    }
-  }
-};
+type ConverterStatus = 'idle' | 'converting' | 'uploading' | 'success' | 'error';
+type ImageFormat = 'avif' | 'webp';
 
 interface UploadResponse {
   success: boolean;
-  originalSizeKB: number;
   directLink: string;
-  pageUrl: string;
+  pageUrl?: string;
+  originalSizeKB?: number;
+}
+
+interface ConversionOptions {
+  quality?: number; 
 }
 
 interface UseAvifConverterProps {
@@ -28,89 +20,135 @@ interface UseAvifConverterProps {
 }
 
 interface UseAvifConverterReturn {
-  convertAndUpload: (imageFile: File) => Promise<UploadResponse | undefined>;
-  isLoading: boolean;
+  upload: (imageFile: File) => Promise<UploadResponse | undefined>;
+  uploadAvif: (imageFile: File, options?: ConversionOptions) => Promise<UploadResponse | undefined>;
+  uploadWebp: (imageFile: File, options?: ConversionOptions) => Promise<UploadResponse | undefined>;
+  status: ConverterStatus;
   error: string | null;
-  avifUrl: string | null;
+  uploadResult: UploadResponse | null;
 }
 
-async function fileToImageData(file: File): Promise<ImageData> {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return reject(new Error('Could not get canvas context'));
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, img.width, img.height);
-      resolve(imageData);
-    };
-    img.onerror = (e) => reject(new Error('Failed to load image'));
-    img.src = URL.createObjectURL(file);
-  });
-}
 
-export const useAvifConverter = ({
+export const useUpAvif = ({
   uploadUrl = 'https://avifupload.vercel.app/',
   formFieldName = 'image',
 }: UseAvifConverterProps = {}): UseAvifConverterReturn => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [avifUrl, setAvifUrl] = useState<string | null>(null);
 
-  const convertAndUpload = useCallback(async (imageFile: File): Promise<UploadResponse | undefined> => {
-    setIsLoading(true);
+  const [status, setStatus] = useState<ConverterStatus>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [uploadResult, setUploadResult] = useState<UploadResponse | null>(null);
+
+  const resetState = () => {
+    setStatus('idle');
     setError(null);
-    setAvifUrl(null);
+    setUploadResult(null);
+  };
+
+  const performUpload = useCallback(async (fileToUpload: File): Promise<UploadResponse | undefined> => {
+    setStatus('uploading');
+    const formData = new FormData();
+    formData.append(formFieldName, fileToUpload, fileToUpload.name);
 
     try {
-      await initializeWasm();
+      const response = await fetch(uploadUrl, { method: 'POST', body: formData });
+      if (!response.ok) throw new Error(`Upload failed: ${response.statusText}`);
 
-      const imageData = await fileToImageData(imageFile);
+      const result: UploadResponse = await response.json();
+      if (!result.success || !result.directLink) throw new Error("API response invalid.");
 
-      const avifBinary = await encode(imageData);
-      if (!avifBinary) throw new Error('AVIF encoding failed - no binary data returned');
-
-      const avifBlob = new Blob([avifBinary], { type: 'image/avif' });
-      
-      const avifFile = new File([avifBlob], 'image.avif', { type: 'image/avif' });
-
-      const formData = new FormData();
-      formData.append(formFieldName, avifFile);
-
-      const response = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Upload failed: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      
-      if (!result.success || !result.directLink) {
-        throw new Error("API response is invalid. Expected 'success' and 'directLink' fields.");
-      }
-
-      setAvifUrl(result.directLink);
-      return {
-        success: result.success,
-        originalSizeKB: result.originalSizeKB,
-        directLink: result.directLink,
-        pageUrl: result.pageUrl
-      };
+      setUploadResult(result);
+      setStatus('success');
+      return result;
 
     } catch (e: any) {
-      console.error('Operation failed:', e);
-      setError(e.message || 'An unknown error occurred.');
+      setError(e.message || 'An unknown upload error occurred.');
+      setStatus('error');
+      console.error('Upload failed:', e);
       return undefined;
-    } finally {
-      setIsLoading(false);
     }
   }, [uploadUrl, formFieldName]);
+  
+  const convertAndUploadInternal = useCallback(async (
+    imageFile: File,
+    format: ImageFormat,
+    options: ConversionOptions = {}
+  ): Promise<UploadResponse | undefined> => {
+    resetState();
 
-  return { convertAndUpload, isLoading, error, avifUrl };
-}; 
+    try {
+      setStatus('converting');
+
+      const mimeType = `image/${format}`;
+      const quality = options.quality ?? 0.75; 
+      
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = e => {
+              const img = new window.Image();
+              img.onload = () => resolve(img);
+              img.onerror = () => reject(new Error('Failed to load image.'));
+              img.src = e.target?.result as string;
+          };
+          reader.onerror = () => reject(new Error('Failed to read file.'));
+          reader.readAsDataURL(imageFile);
+      });
+      
+      const convertedBlob = await new Promise<Blob>((resolve, reject) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return reject(new Error('Could not get canvas context.'));
+          
+          ctx.drawImage(image, 0, 0);
+
+          canvas.toBlob(blob => {
+              if (blob) {
+                  resolve(blob);
+              } else {
+                  reject(new Error(`Conversion to ${format} failed. Your browser likely does not support encoding this format.`));
+              }
+          }, mimeType, quality);
+      });
+
+      const originalName = imageFile.name.substring(0, imageFile.name.lastIndexOf('.')) || 'image';
+      const convertedFile = new File([convertedBlob], `${originalName}.${format}`, { type: mimeType });
+
+      return await performUpload(convertedFile);
+
+    } catch (e: any) {
+      setError(e.message);
+      setStatus('error');
+      console.error(`Operation failed for ${format}:`, e);
+      return undefined;
+    }
+  }, [performUpload]);
+
+  const upload = useCallback(async (imageFile: File): Promise<UploadResponse | undefined> => {
+    resetState();
+    return await performUpload(imageFile);
+  }, [performUpload]);
+
+  const uploadAvif = useCallback(async (imageFile: File, options?: ConversionOptions): Promise<UploadResponse | undefined> => {
+    return await convertAndUploadInternal(imageFile, 'avif', options);
+  }, [convertAndUploadInternal]);
+
+  const uploadWebp = useCallback(async (imageFile: File, options?: ConversionOptions): Promise<UploadResponse | undefined> => {
+    return await convertAndUploadInternal(imageFile, 'webp', options);
+  }, [convertAndUploadInternal]);
+
+  return { 
+    upload, 
+    uploadAvif, 
+    uploadWebp,
+    status,
+    error,
+    uploadResult
+  };
+};
+
+// Export types
+export type { ConverterStatus, UploadResponse, ConversionOptions, UseAvifConverterProps, UseAvifConverterReturn };
+
+// Backward compatibility alias
+export const useAvifConverter = useUpAvif;
